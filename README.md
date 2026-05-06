@@ -1,64 +1,69 @@
-📚 Web Absensi SMKN 1 Kepanjen
+🎓 Web Absensi Siswa SMKN 1 Kepanjen
+Sistem absensi berbasis web yang dirancang untuk mendigitalisasi proses pencatatan kehadiran siswa secara lebih efektif, akurat, dan terintegrasi.
 
-Sistem absensi siswa berbasis website yang dibuat menggunakan **React + Vite + Firebase**.
-Project ini bertujuan untuk mempermudah proses pencatatan kehadiran siswa secara digital.
+📌 Deskripsi
+Web Absensi ini memungkinkan siswa melakukan presensi secara online dengan dukungan fitur lokasi dan pencatatan waktu secara otomatis. Sistem ini juga menyediakan akses bagi admin untuk memonitor dan merekap data kehadiran.
 
-✨ Fitur Utama
+⚙️ Fitur Utama
+* Autentikasi pengguna (Login dengan NISN)
+* Absensi masuk & pulang
+* Pencatatan waktu secara real-time
+* Integrasi lokasi (geolocation)
+* Riwayat absensi siswa
+* Rekap data kehadiran (harian & bulanan)
+* Dashboard admin
 
- -🔐 Login siswa menggunakan NISN & password
- -🕒 Absensi Datang & Pulang
- -📍 Lokasi absensi (maps)
- -📊 Riwayat kehadiran siswa
- -📈 Rekap kehadiran (harian & bulanan)
- -👨‍💼 Role Admin (melihat data seluruh siswa)
+🧰 Teknologi
+* Frontend: React JS (Vite)
+* Backend & Database: Firebase (Firestore)
+* Maps & Location: Leaflet
+* Routing: React Router
+* UI: CSS Custom
 
-🛠️ Teknologi yang Digunakan
+🚀 Instalasi & Menjalankan Project
+1. Clone repository
+ git clone https://github.com/ririnnnyulianti/smkn1kepanjen.git
+2. Masuk ke folder project
+ cd smkn1kepanjen
+3. Install dependencies
+ npm install
+4. Jalankan project
+ npm run dev
 
- -⚛️ React JS
- -⚡ Vite
- -🔥 Firebase (Firestore & Hosting)
- -🗺️ Leaflet (Maps)
- -🎨 CSS Custom
-
-🚀 Cara Menjalankan Project
-
-1. Clone Repository
-git clone https://github.com/ririnnnyulianti/smkn1kepanjen.git
-
-2. Masuk ke Folder
-cd smkn1kepanjen
-
-3. Install Dependencies
-npm install
-
-4. Jalankan Project
-npm run dev
-
-🌐 Deploy
-
-Project ini dapat diakses melalui GitHub Pages:
+ 🌐 Deployment
+Aplikasi dapat diakses melalui:
 👉 https://ririnnnyulianti.github.io/smkn1kepanjen/
 
- 📌 Struktur Fitur
+ 📊 Struktur Project
 
-/src → source code utama
-/public → asset statis
-/dist → hasil build
-firebase.json → konfigurasi firebase
+src/
+ ├── components/
+ ├── pages/
+ ├── assets/
+ └── services/
 
-🎯 Tujuan Project
+public/
+dist/
 
-Project ini dibuat sebagai bagian dari:
-* Praktik Kerja Lapangan (PKL)
-* Pengembangan sistem digital di sekolah
-* Pembelajaran React JS & Web Development
+ 🎯 Tujuan Pengembangan
 
- 👩‍💻 Developer
+* Mendukung digitalisasi sistem sekolah
+* Mengurangi penggunaan absensi manual
+* Meningkatkan akurasi data kehadiran
+* Sebagai implementasi pembelajaran React JS
+
+ 👩‍💻 Pengembang
+
 Ririn Yulianti
-SMKN 1 Kepanjen – Jurusan RPL
+SMKN 1 Kepanjen – Rekayasa Perangkat Lunak
 
-📬 Kontak
-📧 Email: [ririnyulianti2009@gmail.com](mailto:ririnyulianti2009@gmail.com)
+ 📬 Kontak
 
-⭐ Penutup
-Semoga project ini bermanfaat dan dapat dikembangkan lebih lanjut 🚀
+Email: [ririnyulianti2009@gmail.com](mailto:ririnyulianti2009@gmail.com)
+
+ 📝 Catatan
+Project ini masih dalam tahap pengembangan dan dapat terus dikembangkan dengan fitur tambahan seperti notifikasi, laporan lanjutan, dan integrasi sistem sekolah lainnya.
+
+ ⭐ Penutup
+
+Diharapkan sistem ini dapat menjadi solusi praktis dan efisien dalam pengelolaan absensi siswa di lingkungan sekolah.
