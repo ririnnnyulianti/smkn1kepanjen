@@ -1,0 +1,34 @@
+{
+  "name": "testabsensi-web",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "homepage": "https://ririnnnyulianti.github.io/smkn1kepanjen/",
+  "scripts": {
+    "start": "vite",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy-gh": "gh-pages -d dist",
+    "firebase:login": "npx firebase-tools login",
+    "firebase:use": "npx firebase-tools use absensi-cfb6e",
+    "deploy": "npm run build && npx firebase-tools deploy --only firestore:rules,storage,hosting",
+    "deploy:hosting": "npm run build && npx firebase-tools deploy --only hosting",
+    "deploy:rules": "npx firebase-tools deploy --only firestore:rules,storage"
+  },
+  "dependencies": {
+    "@dataconnect/generated": "file:src/dataconnect-generated",
+    "firebase": "^12.11.0",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^0.576.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "react-leaflet": "^5.0.0",
+    "react-router-dom": "^7.9.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.4",
+    "gh-pages": "^6.3.0",
+    "vite": "^7.1.10"
+  }
+}
