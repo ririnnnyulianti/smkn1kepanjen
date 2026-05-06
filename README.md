@@ -5,20 +5,20 @@ Project ini bertujuan untuk mempermudah proses pencatatan kehadiran siswa secara
 
 ✨ Fitur Utama
 
- 🔐 Login siswa menggunakan NISN & password
- 🕒 Absensi Datang & Pulang
- 📍 Lokasi absensi (maps)
- 📊 Riwayat kehadiran siswa
- 📈 Rekap kehadiran (harian & bulanan)
- 👨‍💼 Role Admin (melihat data seluruh siswa)
+ -🔐 Login siswa menggunakan NISN & password
+ -🕒 Absensi Datang & Pulang
+ -📍 Lokasi absensi (maps)
+ -📊 Riwayat kehadiran siswa
+ -📈 Rekap kehadiran (harian & bulanan)
+ -👨‍💼 Role Admin (melihat data seluruh siswa)
 
 🛠️ Teknologi yang Digunakan
 
- ⚛️ React JS
- ⚡ Vite
- 🔥 Firebase (Firestore & Hosting)
- 🗺️ Leaflet (Maps)
- 🎨 CSS Custom
+ -⚛️ React JS
+ -⚡ Vite
+ -🔥 Firebase (Firestore & Hosting)
+ -🗺️ Leaflet (Maps)
+ -🎨 CSS Custom
 
 🚀 Cara Menjalankan Project
 
