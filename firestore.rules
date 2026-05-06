@@ -1,0 +1,185 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function currentUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function currentUserExists() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function currentUserData() {
+      return currentUserDoc().data;
+    }
+
+    function currentUserNisn() {
+      return currentUserData().nisn;
+    }
+
+    function isAdmin() {
+      return currentUserExists() &&
+        currentUserData().role == "admin";
+    }
+
+    function isSelfProfile(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function ownsAttendanceRecord() {
+      return currentUserExists() &&
+        currentUserNisn() is string &&
+        currentUserNisn().size() > 0 &&
+        request.resource.data.userNisn == currentUserNisn();
+    }
+
+    function isNonEmptyString(value, maxLength) {
+      return value is string && value.size() > 0 && value.size() <= maxLength;
+    }
+
+    function isOptionalString(value, maxLength) {
+      return !(value is string) || value.size() <= maxLength;
+    }
+
+    function isOptionalTimeString(value) {
+      return value == null || (value is string && value.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'));
+    }
+
+    function isDaySchedule(dayData) {
+      return dayData is map &&
+        dayData.keys().hasOnly(["isActive", "checkIn", "checkOut"]) &&
+        dayData.isActive is bool &&
+        isOptionalTimeString(dayData.checkIn) &&
+        isOptionalTimeString(dayData.checkOut);
+    }
+
+    function isWeeklySchedule(data) {
+      return data is map &&
+        data.keys().hasOnly([
+          "senin",
+          "selasa",
+          "rabu",
+          "kamis",
+          "jumat",
+          "sabtu",
+          "minggu"
+        ]) &&
+        isDaySchedule(data.senin) &&
+        isDaySchedule(data.selasa) &&
+        isDaySchedule(data.rabu) &&
+        isDaySchedule(data.kamis) &&
+        isDaySchedule(data.jumat) &&
+        isDaySchedule(data.sabtu) &&
+        isDaySchedule(data.minggu);
+    }
+
+    function isLocationPayload(location) {
+      return location is map &&
+        location.keys().hasOnly(["latitude", "longitude", "name"]) &&
+        location.latitude is number &&
+        location.longitude is number &&
+        isNonEmptyString(location.name, 160);
+    }
+
+    function isAttendancePayload() {
+      return request.resource.data.keys().hasOnly([
+          "id",
+          "date",
+          "dateLabel",
+          "dateValue",
+          "school",
+          "checkInTime",
+          "checkOutTime",
+          "status",
+          "photoUri",
+          "userNisn"
+        ]) &&
+        isNonEmptyString(request.resource.data.id, 120) &&
+        isNonEmptyString(request.resource.data.date, 20) &&
+        isNonEmptyString(request.resource.data.dateLabel, 60) &&
+        request.resource.data.dateValue is int &&
+        isNonEmptyString(request.resource.data.school, 120) &&
+        request.resource.data.status in ["hadir", "terlambat", "tidak_hadir"] &&
+        isNonEmptyString(request.resource.data.userNisn, 32) &&
+        request.resource.data.id == request.resource.data.userNisn + "_" + request.resource.data.date &&
+        request.resource.id == request.resource.data.userNisn + "_" + request.resource.data.date &&
+        isOptionalString(request.resource.data.checkInTime, 20) &&
+        isOptionalString(request.resource.data.checkOutTime, 20) &&
+        isOptionalString(request.resource.data.photoUri, 700000);
+    }
+
+    function isAttendanceSettingsPayload() {
+      return request.resource.data.keys().hasOnly([
+          "name",
+          "radiusMeters",
+          "location",
+          "weeklySchedule"
+        ]) &&
+        isNonEmptyString(request.resource.data.name, 120) &&
+        request.resource.data.radiusMeters is number &&
+        request.resource.data.radiusMeters > 0 &&
+        isLocationPayload(request.resource.data.location) &&
+        isWeeklySchedule(request.resource.data.weeklySchedule);
+    }
+
+    function isUserProfilePayload() {
+      return request.resource.data.keys().hasOnly([
+          "nisn",
+          "name",
+          "kelas",
+          "jurusan",
+          "tanggalLahir",
+          "email",
+          "phone",
+          "alamat",
+          "avatar",
+          "role"
+        ]) &&
+        isNonEmptyString(request.resource.data.nisn, 32) &&
+        isNonEmptyString(request.resource.data.name, 120) &&
+        isOptionalString(request.resource.data.kelas, 60) &&
+        isOptionalString(request.resource.data.jurusan, 60) &&
+        isOptionalString(request.resource.data.tanggalLahir, 60) &&
+        isNonEmptyString(request.resource.data.email, 160) &&
+        isOptionalString(request.resource.data.phone, 32) &&
+        isOptionalString(request.resource.data.alamat, 200) &&
+        isOptionalString(request.resource.data.avatar, 700000) &&
+        request.resource.data.role in ["admin", "user"];
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn() && (isSelfProfile(userId) || isAdmin());
+      allow create: if isAdmin() && isUserProfilePayload();
+      allow update: if isAdmin() && isUserProfilePayload();
+      allow delete: if false;
+    }
+
+    match /login_index/{nisn} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /attendance/{documentId} {
+      allow read: if isSignedIn() &&
+        (resource.data.userNisn == currentUserNisn() || isAdmin());
+      allow create, update: if isAttendancePayload() && (ownsAttendanceRecord() || isAdmin());
+      allow delete: if false;
+    }
+
+    match /app_settings/attendance {
+      allow read: if isSignedIn();
+      allow create, update: if isAdmin() && isAttendanceSettingsPayload();
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
