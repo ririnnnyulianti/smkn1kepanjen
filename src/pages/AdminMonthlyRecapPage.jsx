@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
-import { RefreshCw, Search } from "lucide-react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { Info, RefreshCw, Search } from "lucide-react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 
 import { db } from "../firebase";
 import { useSettings } from "../context/SettingsContext";
+import { getNationalHolidaysByMonth } from "../services/holidayService";
+import { timeStringToMinutes } from "../utils";
 
 const MONTH_OPTIONS = [
   { value: 0, label: "Januari" },
@@ -47,6 +49,7 @@ function AdminMonthlyRecapPage() {
   const [activeFilters, setActiveFilters] = useState(null);
   const [students, setStudents] = useState([]);
   const [attendanceRecords, setAttendanceRecords] = useState([]);
+  const [monthHolidays, setMonthHolidays] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState(EMPTY_FILTER_MESSAGE);
   const [studentKeyword, setStudentKeyword] = useState("");
@@ -54,7 +57,6 @@ function AdminMonthlyRecapPage() {
 
   const yearOptions = useMemo(() => {
     const currentYear = todayJakartaParts.year;
-
     return Array.from({ length: 7 }, (_, index) => currentYear - 2 + index);
   }, [todayJakartaParts.year]);
 
@@ -67,6 +69,7 @@ function AdminMonthlyRecapPage() {
     [activeFilters]
   );
   const classNumberOptions = selectedMajor?.classNumbers ?? [];
+
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       setToday(new Date());
@@ -81,7 +84,6 @@ function AdminMonthlyRecapPage() {
     }
 
     const hasCurrentNumber = selectedMajor.classNumbers.includes(Number(filters.classNumber));
-
     if (!hasCurrentNumber) {
       setFilters((current) => ({
         ...current,
@@ -89,6 +91,24 @@ function AdminMonthlyRecapPage() {
       }));
     }
   }, [filters.classNumber, selectedMajor]);
+
+  useEffect(() => {
+    if (!activeFilters) {
+      setMonthHolidays([]);
+      return;
+    }
+
+    let active = true;
+    getNationalHolidaysByMonth(new Date(activeFilters.year, activeFilters.month, 1)).then((result) => {
+      if (active) {
+        setMonthHolidays(result.filter((item) => item.isNationalHoliday));
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [activeFilters]);
 
   useEffect(() => {
     if (!activeFilters) {
@@ -158,6 +178,7 @@ function AdminMonthlyRecapPage() {
               const mergedRecords = Array.from(chunkRecords.values()).flat();
               setAttendanceRecords(mergedRecords);
               setIsLoading(pendingChunks.size > 0);
+
               if (pendingChunks.size === 0) {
                 setMessage(
                   mergedRecords.length
@@ -193,12 +214,23 @@ function AdminMonthlyRecapPage() {
     };
   }, [activeFilters, refreshKey]);
 
+  const holidayMap = useMemo(
+    () => Object.fromEntries(monthHolidays.map((holiday) => [holiday.date, holiday])),
+    [monthHolidays]
+  );
+
   const recapRows = useMemo(() => {
     if (!activeFilters) {
       return [];
     }
 
     const monthRange = getMonthRange(activeFilters.year, activeFilters.month);
+    const todayKey = buildMonthDateKey(
+      todayJakartaParts.year,
+      todayJakartaParts.month - 1,
+      todayJakartaParts.day
+    );
+    const currentMinutes = getJakartaMinutes(today);
     const attendanceByNisnAndDate = attendanceRecords.reduce((result, record) => {
       if (!record.userNisnKey || !record.date) {
         return result;
@@ -209,54 +241,40 @@ function AdminMonthlyRecapPage() {
     }, {});
 
     return students.map((student, index) => {
-      const counts = { hadir: 0, terlambat: 0, tidakHadir: 0, libur: 0 };
+      const checkInTotals = createEmptyTotals();
+      const checkOutTotals = createEmptyTotals();
       const days = Array.from({ length: 31 }, (_, dayIndex) => {
         const dayNumber = dayIndex + 1;
 
         if (dayNumber > monthRange.daysInMonth) {
           return {
             dayNumber,
-            label: "-",
-            statusType: "outside",
-            title: "Tanggal di luar bulan terpilih",
+            checkIn: buildOutsideStatus(),
+            checkOut: buildOutsideStatus(),
           };
         }
 
         const dateKey = buildMonthDateKey(activeFilters.year, activeFilters.month, dayNumber);
         const currentDateUtc = createUtcDate(activeFilters.year, activeFilters.month, dayNumber);
-        const dayStatus = getCalendarDayStatus({
+        const record = attendanceByNisnAndDate[`${student.nisnKey}_${dateKey}`];
+        const holiday = holidayMap[dateKey] ?? null;
+        const dailyStatus = getCalendarDayStatuses({
           date: currentDateUtc,
           dateKey,
-          todayKey: buildMonthDateKey(
-            todayJakartaParts.year,
-            todayJakartaParts.month - 1,
-            todayJakartaParts.day
-          ),
+          todayKey,
+          currentMinutes,
           schedule: settings.weeklySchedule,
-          record: attendanceByNisnAndDate[`${student.nisnKey}_${dateKey}`],
+          record,
+          holiday,
         });
 
-        if (dayStatus.statusType === "hadir") {
-          counts.hadir += 1;
-        }
-
-        if (dayStatus.statusType === "terlambat") {
-          counts.terlambat += 1;
-        }
-
-        if (dayStatus.statusType === "tidak_hadir") {
-          counts.tidakHadir += 1;
-        }
-
-        if (dayStatus.statusType === "libur") {
-          counts.libur += 1;
-        }
+        incrementTotals(checkInTotals, dailyStatus.checkIn.statusType);
+        incrementTotals(checkOutTotals, dailyStatus.checkOut.statusType);
 
         return {
           dayNumber,
-          label: getStatusLabel(dayStatus.statusType),
-          statusType: dayStatus.statusType,
-          title: dayStatus.title,
+          checkIn: dailyStatus.checkIn,
+          checkOut: dailyStatus.checkOut,
         };
       });
 
@@ -265,10 +283,19 @@ function AdminMonthlyRecapPage() {
         no: index + 1,
         student,
         days,
-        totals: counts,
+        checkInTotals,
+        checkOutTotals,
       };
     });
-  }, [activeFilters, attendanceRecords, settings.weeklySchedule, students, todayJakartaParts]);
+  }, [
+    activeFilters,
+    attendanceRecords,
+    holidayMap,
+    settings.weeklySchedule,
+    students,
+    today,
+    todayJakartaParts,
+  ]);
 
   const filteredRecapRows = useMemo(() => {
     const keyword = studentKeyword.trim().toLowerCase();
@@ -280,7 +307,6 @@ function AdminMonthlyRecapPage() {
     return recapRows.filter((row) => {
       const studentName = row.student.name.toLowerCase();
       const studentNisn = row.student.nisn.toLowerCase();
-
       return studentName.includes(keyword) || studentNisn.includes(keyword);
     });
   }, [recapRows, studentKeyword]);
@@ -292,7 +318,8 @@ function AdminMonthlyRecapPage() {
   const legendItems = [
     { label: "Hadir", className: "hadir", shortLabel: "H" },
     { label: "Terlambat", className: "terlambat", shortLabel: "T" },
-    { label: "Tidak hadir", className: "tidak_hadir", shortLabel: "A" },
+    { label: "Alpha", className: "tidak_hadir", shortLabel: "A" },
+    { label: "Belum absen", className: "pending", shortLabel: "-" },
     { label: "Hari libur", className: "libur", shortLabel: "L" },
   ];
 
@@ -336,7 +363,7 @@ function AdminMonthlyRecapPage() {
           <p className="eyebrow">Admin</p>
           <h1>Data Absensi Bulanan</h1>
           <p className="page-description">
-            Filter kelas dan periode untuk melihat data absensi bulanan siswa secara realtime.
+            Tabel menampilkan absensi datang (D) dan pulang (P) secara terpisah untuk tiap siswa.
           </p>
         </div>
       </div>
@@ -415,20 +442,22 @@ function AdminMonthlyRecapPage() {
             </label>
           ) : null}
 
-          <button className="primary-button monthly-recap-submit" type="submit">
-            <Search size={18} />
-            <span>Tampilkan</span>
-          </button>
+          <div className="monthly-recap-action-stack">
+            <button className="primary-button monthly-recap-submit" type="submit">
+              <Search size={18} />
+              <span>Tampilkan</span>
+            </button>
 
-          <button
-            className="secondary-button monthly-recap-refresh"
-            type="button"
-            onClick={handleRefresh}
-            disabled={!activeFilters || isLoading}
-          >
-            <RefreshCw size={18} />
-            <span>{isLoading ? "Sinkron..." : "Sinkronkan Ulang"}</span>
-          </button>
+            <button
+              className="secondary-button monthly-recap-refresh"
+              type="button"
+              onClick={handleRefresh}
+              disabled={!activeFilters || isLoading}
+            >
+              <RefreshCw size={18} />
+              <span>{isLoading ? "Sinkron..." : "Sinkronkan Ulang"}</span>
+            </button>
+          </div>
         </form>
       </article>
 
@@ -472,6 +501,9 @@ function AdminMonthlyRecapPage() {
                 <th className="sticky-col sticky-col-name" rowSpan={2}>
                   Nama Siswa
                 </th>
+                <th className="sticky-col sticky-col-type" rowSpan={2}>
+                  Jenis
+                </th>
                 {Array.from({ length: 31 }, (_, index) => (
                   <th key={index + 1} rowSpan={2}>
                     {index + 1}
@@ -490,36 +522,58 @@ function AdminMonthlyRecapPage() {
             </thead>
             <tbody>
               {filteredRecapRows.map((row) => (
-                <tr key={row.id}>
-                  <td className="sticky-col sticky-col-no">{row.no}</td>
-                  <td className="sticky-col sticky-col-name">
-                    <div className="monthly-recap-student-cell">
-                      <strong>{row.student.name}</strong>
-                      <span>
-                        {row.student.nisn}
-                        {selectedMajorForActiveFilter ? ` • ${selectedMajorForActiveFilter.name}` : ""}
-                      </span>
-                    </div>
-                  </td>
-                  {row.days.map((day) => (
-                    <td
-                      key={`${row.id}-${day.dayNumber}`}
-                      className={`attendance-status-cell ${day.statusType}`}
-                      title={day.title}
-                    >
-                      {day.label}
+                <Fragment key={row.id}>
+                  <tr key={`${row.id}-D`}>
+                    <td className="sticky-col sticky-col-no" rowSpan={2}>
+                      {row.no}
                     </td>
-                  ))}
-                  <td className="sticky-col sticky-col-total-value">{row.totals.hadir}</td>
-                  <td className="sticky-col sticky-col-total-value">{row.totals.terlambat}</td>
-                  <td className="sticky-col sticky-col-total-value">{row.totals.tidakHadir}</td>
-                  <td className="sticky-col sticky-col-total-value">{row.totals.libur ?? 0}</td>
-                </tr>
+                    <td className="sticky-col sticky-col-name" rowSpan={2}>
+                      <div className="monthly-recap-student-cell">
+                        <strong>{row.student.name}</strong>
+                        <span>
+                          {row.student.nisn}
+                          {selectedMajorForActiveFilter ? ` • ${selectedMajorForActiveFilter.name}` : ""}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="sticky-col sticky-col-type monthly-recap-kind-cell">D</td>
+                    {row.days.map((day) => (
+                      <td
+                        key={`${row.id}-D-${day.dayNumber}`}
+                        className={`attendance-status-cell ${day.checkIn.statusType}`}
+                        title={day.checkIn.title}
+                      >
+                        {day.checkIn.label}
+                      </td>
+                    ))}
+                    <td className="sticky-col sticky-col-total-value">{row.checkInTotals.hadir}</td>
+                    <td className="sticky-col sticky-col-total-value">{row.checkInTotals.terlambat}</td>
+                    <td className="sticky-col sticky-col-total-value">{row.checkInTotals.tidak_hadir}</td>
+                    <td className="sticky-col sticky-col-total-value">{row.checkInTotals.libur}</td>
+                  </tr>
+
+                  <tr key={`${row.id}-P`}>
+                    <td className="sticky-col sticky-col-type monthly-recap-kind-cell">P</td>
+                    {row.days.map((day) => (
+                      <td
+                        key={`${row.id}-P-${day.dayNumber}`}
+                        className={`attendance-status-cell ${day.checkOut.statusType}`}
+                        title={day.checkOut.title}
+                      >
+                        {day.checkOut.label}
+                      </td>
+                    ))}
+                    <td className="sticky-col sticky-col-total-value">{row.checkOutTotals.hadir}</td>
+                    <td className="sticky-col sticky-col-total-value">{row.checkOutTotals.terlambat}</td>
+                    <td className="sticky-col sticky-col-total-value">{row.checkOutTotals.tidak_hadir}</td>
+                    <td className="sticky-col sticky-col-total-value">{row.checkOutTotals.libur}</td>
+                  </tr>
+                </Fragment>
               ))}
 
               {!filteredRecapRows.length ? (
                 <tr>
-                  <td className="monthly-recap-empty" colSpan={37}>
+                  <td className="monthly-recap-empty" colSpan={39}>
                     {isLoading
                       ? "Memuat data absensi..."
                       : studentKeyword.trim()
@@ -530,6 +584,14 @@ function AdminMonthlyRecapPage() {
               ) : null}
             </tbody>
           </table>
+        </div>
+
+        <div className="monthly-recap-note">
+          <Info size={16} />
+          <span>
+            Catatan: D = Datang, P = Pulang. Jika jam absensi sudah lewat dan siswa belum presensi,
+            status otomatis dibaca sebagai A. Hari Minggu dan hari libur nasional otomatis menjadi L.
+          </span>
         </div>
       </article>
     </section>
@@ -558,6 +620,8 @@ function normalizeAttendanceRecord(id, data) {
     date: normalizedDate,
     dateValue: Number(data.dateValue ?? new Date(normalizedDate || 0).getTime()),
     status: normalizedStatus,
+    checkInTime: `${data.checkInTime ?? ""}`.trim() || null,
+    checkOutTime: `${data.checkOutTime ?? ""}`.trim() || null,
     userNisn: `${data.userNisn ?? ""}`.trim(),
     userNisnKey: normalizeNisnKey(data.userNisn),
   };
@@ -595,49 +659,117 @@ function createUtcDate(year, month, day) {
   return new Date(Date.UTC(year, month, day));
 }
 
-function getCalendarDayStatus({ date, dateKey, todayKey, schedule, record }) {
+function getCalendarDayStatuses({
+  date,
+  dateKey,
+  todayKey,
+  currentMinutes,
+  schedule,
+  record,
+  holiday,
+}) {
   const dayKey = getDayKeyFromUtcDate(date);
   const daySchedule = schedule?.[dayKey];
+  const isNationalHoliday = Boolean(holiday);
 
-  if (!daySchedule?.isActive) {
+  if (dayKey === "minggu" || isNationalHoliday || !daySchedule?.isActive) {
+    const holidayLabel = holiday?.name ?? "Hari libur";
     return {
-      statusType: "libur",
-      title: `${dateKey} - Hari libur`,
+      checkIn: createStatus("libur", `${dateKey} - ${holidayLabel}`),
+      checkOut: createStatus("libur", `${dateKey} - ${holidayLabel}`),
     };
   }
 
   if (dateKey > todayKey) {
     return {
-      statusType: "future",
-      title: `${dateKey} - Belum berjalan`,
+      checkIn: createStatus("pending", `${dateKey} - Jadwal belum berjalan`),
+      checkOut: createStatus("pending", `${dateKey} - Jadwal belum berjalan`),
     };
   }
 
-  if (record?.status === "terlambat") {
-    return {
-      statusType: "terlambat",
-      title: `${dateKey} - Terlambat`,
-    };
+  const checkInClosedMinutes = timeStringToMinutes(daySchedule.lateEnd);
+  const checkOutClosedMinutes = timeStringToMinutes(daySchedule.checkOutEnd);
+
+  const checkInStatus = getCheckInStatus({
+    dateKey,
+    todayKey,
+    currentMinutes,
+    closedMinutes: checkInClosedMinutes,
+    record,
+  });
+  const checkOutStatus = getCheckOutStatus({
+    dateKey,
+    todayKey,
+    currentMinutes,
+    closedMinutes: checkOutClosedMinutes,
+    record,
+  });
+
+  return { checkIn: checkInStatus, checkOut: checkOutStatus };
+}
+
+function getCheckInStatus({ dateKey, todayKey, currentMinutes, closedMinutes, record }) {
+  if (record?.checkInTime) {
+    if (record.status === "terlambat") {
+      return createStatus("terlambat", `${dateKey} - Datang terlambat`);
+    }
+
+    return createStatus("hadir", `${dateKey} - Datang hadir`);
   }
 
-  if (record?.status === "hadir") {
-    return {
-      statusType: "hadir",
-      title: `${dateKey} - Hadir`,
-    };
+  if (dateKey < todayKey) {
+    return createStatus("tidak_hadir", `${dateKey} - Tidak absen datang`);
   }
 
-  if (record?.status === "tidak_hadir") {
-    return {
-      statusType: "tidak_hadir",
-      title: `${dateKey} - Tidak hadir`,
-    };
+  if (currentMinutes > closedMinutes) {
+    return createStatus("tidak_hadir", `${dateKey} - Jam datang ditutup, siswa alpha`);
   }
 
+  return createStatus("pending", `${dateKey} - Absensi datang masih dibuka`);
+}
+
+function getCheckOutStatus({ dateKey, todayKey, currentMinutes, closedMinutes, record }) {
+  if (record?.checkOutTime) {
+    return createStatus("hadir", `${dateKey} - Pulang berhasil`);
+  }
+
+  if (dateKey < todayKey) {
+    return createStatus("tidak_hadir", `${dateKey} - Tidak absen pulang`);
+  }
+
+  if (currentMinutes > closedMinutes) {
+    return createStatus("tidak_hadir", `${dateKey} - Jam pulang ditutup, siswa alpha`);
+  }
+
+  return createStatus("pending", `${dateKey} - Absensi pulang masih dibuka atau belum dibuka`);
+}
+
+function createStatus(statusType, title) {
   return {
-    statusType: "tidak_hadir",
-    title: `${dateKey} - Tidak hadir`,
+    statusType,
+    label: getStatusLabel(statusType),
+    title,
   };
+}
+
+function buildOutsideStatus() {
+  return createStatus("outside", "Tanggal di luar bulan terpilih");
+}
+
+function createEmptyTotals() {
+  return {
+    hadir: 0,
+    terlambat: 0,
+    tidak_hadir: 0,
+    libur: 0,
+    pending: 0,
+  };
+}
+
+function incrementTotals(totals, statusType) {
+  if (statusType in totals) {
+    totals[statusType] += 1;
+  }
 }
 
 function getDayKeyFromUtcDate(date) {
@@ -664,6 +796,8 @@ function getStatusLabel(statusType) {
       return "A";
     case "libur":
       return "L";
+    case "outside":
+      return "";
     default:
       return "-";
   }
@@ -683,6 +817,20 @@ function getJakartaDateParts(date) {
     month: Number(parts.find((part) => part.type === "month")?.value ?? 1),
     day: Number(parts.find((part) => part.type === "day")?.value ?? 1),
   };
+}
+
+function getJakartaMinutes(date) {
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: JAKARTA_TIMEZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(date);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
+
+  return hour * 60 + minute;
 }
 
 function normalizeStatus(status) {

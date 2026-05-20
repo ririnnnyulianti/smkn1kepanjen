@@ -9,8 +9,13 @@ import { useAttendance } from "../context/AttendanceContext";
 import { useAuth } from "../context/AuthContext";
 import { useSettings } from "../context/SettingsContext";
 import {
+  getNationalHolidayInfo,
+  getNationalHolidaysByMonth,
+} from "../services/holidayService";
+import {
   formatDate,
-  formatScheduleTime,
+  buildDateKey,
+  getAttendanceScheduleSummary,
   formatTime,
   getAttendanceWindow,
   getCalendarMatrix,
@@ -24,21 +29,52 @@ function DashboardPage() {
   const [now, setNow] = useState(new Date());
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date());
+  const [holidayInfo, setHolidayInfo] = useState(null);
+  const [monthHolidays, setMonthHolidays] = useState([]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    let active = true;
+
+    getNationalHolidayInfo(now).then((result) => {
+      if (active) {
+        setHolidayInfo(result);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [buildDateKey(now)]);
+
+  useEffect(() => {
+    let active = true;
+
+    getNationalHolidaysByMonth(selectedMonth).then((result) => {
+      if (active) {
+        setMonthHolidays(result.filter((item) => item.isNationalHoliday));
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedMonth]);
+
   const monthName = new Intl.DateTimeFormat("id-ID", {
     month: "long",
     year: "numeric",
   }).format(selectedMonth);
   const calendarDays = getCalendarMatrix(selectedMonth);
-  const attendanceWindow = getAttendanceWindow(settings, now);
+  const attendanceWindow = getAttendanceWindow(settings, now, holidayInfo);
   const todaySchedule = attendanceWindow.schedule;
   const isOffDay = attendanceWindow.isOffDay;
   const dayLabel = DAY_LABELS[attendanceWindow.dayKey];
+  const isNationalHoliday = attendanceWindow.holiday.isNationalHoliday;
 
   return (
     <section className="page">
@@ -73,9 +109,7 @@ function DashboardPage() {
               <p className="time-card-caption">
                 {isOffDay
                   ? `${dayLabel} libur`
-                  : `${dayLabel} ${formatScheduleTime(todaySchedule?.checkIn)} - ${formatScheduleTime(
-                      todaySchedule?.checkOut
-                    )}`}
+                  : `${dayLabel} ${getAttendanceScheduleSummary(todaySchedule)}`}
               </p>
             </div>
             <button className="icon-button calendar-toggle-button" onClick={() => setCalendarOpen(true)}>
@@ -106,9 +140,19 @@ function DashboardPage() {
         </article>
       </div>
 
+      {isNationalHoliday ? (
+        <div className="holiday-label">
+          Hari Libur Nasional{attendanceWindow.holiday.name ? ` - ${attendanceWindow.holiday.name}` : ""}
+        </div>
+      ) : null}
+
       {isOffDay ? (
-        <div className="inline-message warning">
-          Hari ini {dayLabel} libur. Form foto absen tidak ditampilkan.
+        <div className={`inline-message ${isNationalHoliday ? "error" : "warning"}`}>
+          {isNationalHoliday
+            ? `Hari Libur Nasional${
+                attendanceWindow.holiday.name ? `: ${attendanceWindow.holiday.name}` : ""
+              }. Presensi dinonaktifkan hari ini.`
+            : `Hari ini ${dayLabel} libur. Form foto absen tidak ditampilkan.`}
         </div>
       ) : null}
 
@@ -150,6 +194,7 @@ function DashboardPage() {
       {calendarOpen ? (
         <CalendarModal
           calendarDays={calendarDays}
+          holidays={monthHolidays}
           monthName={monthName}
           onClose={() => setCalendarOpen(false)}
           onNextMonth={() =>

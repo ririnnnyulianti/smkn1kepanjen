@@ -513,15 +513,85 @@ a {
 
 .calendar-day {
   min-height: 46px;
+  border: 0;
   border-radius: var(--radius-xs);
   display: grid;
   place-items: center;
   background: #f8fafc;
+  color: #1f2937;
+  position: relative;
 }
 
 .calendar-day.today {
   background: #1b3a7b;
   color: white;
+}
+
+.calendar-day.holiday {
+  background: #fef2f2;
+  color: #b91c1c;
+  font-weight: 800;
+}
+
+.calendar-day.selected-holiday {
+  box-shadow: inset 0 0 0 2px #ef4444;
+}
+
+.calendar-day-dot {
+  position: absolute;
+  bottom: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.calendar-holiday-panel {
+  margin-top: 18px;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius-sm);
+  background: #fff5f5;
+}
+
+.calendar-holiday-detail {
+  display: grid;
+  gap: 6px;
+}
+
+.calendar-holiday-date {
+  color: #b91c1c;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.calendar-holiday-detail p,
+.calendar-holiday-empty {
+  margin: 0;
+  color: #7f1d1d;
+}
+
+.calendar-holiday-list {
+  display: grid;
+  gap: 10px;
+}
+
+.calendar-holiday-item {
+  border: 0;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: var(--radius-xs);
+  background: #ffffff;
+  color: #1f2937;
+}
+
+.calendar-holiday-item span {
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .attendance-layout,
@@ -668,6 +738,38 @@ a {
   word-break: break-word;
 }
 
+.schedule-pill {
+  gap: 12px;
+}
+
+.schedule-pill-list {
+  display: grid;
+  gap: 10px;
+}
+
+.schedule-pill-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+}
+
+.schedule-pill-row strong {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.schedule-pill-row b {
+  color: #0f172a;
+  font-size: 14px;
+  text-align: right;
+}
+
 .status-box {
   display: grid;
   gap: 6px;
@@ -782,6 +884,21 @@ a {
 .history-photo-date {
   margin-top: 0;
   color: #6b7280;
+}
+
+.history-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.history-photo-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.history-photo-panel strong {
+  color: #1f2937;
 }
 
 .history-photo-modal-image {
@@ -899,6 +1016,51 @@ a {
   line-height: 1.4;
 }
 
+.holiday-label {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.schedule-range-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.schedule-range-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #dbe3ef;
+  border-radius: var(--radius-sm);
+  background: #ffffff;
+}
+
+.schedule-range-card strong {
+  color: #16326a;
+}
+
+.schedule-time-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.schedule-preview-text {
+  margin-top: 14px;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
 .switch-field {
   display: inline-flex;
   align-items: center;
@@ -913,8 +1075,15 @@ a {
   align-items: end;
 }
 
+.monthly-recap-action-stack {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  grid-column: span 6;
+}
+
 .monthly-recap-submit {
-  width: auto;
+  width: 100%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -922,7 +1091,7 @@ a {
 }
 
 .monthly-recap-refresh {
-  width: auto;
+  width: 100%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1008,12 +1177,17 @@ a {
   color: #b91c1c;
 }
 
-.monthly-recap-dot.libur,
-.attendance-status-cell.libur,
-.attendance-status-cell.outside,
-.attendance-status-cell.future {
-  background: #ffffff;
+.monthly-recap-dot.pending,
+.attendance-status-cell.pending,
+.attendance-status-cell.outside {
+  background: #f3f4f6;
   color: #6b7280;
+}
+
+.monthly-recap-dot.libur,
+.attendance-status-cell.libur {
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 .monthly-recap-table-wrap {
@@ -1080,6 +1254,11 @@ a {
   text-align: left;
 }
 
+.sticky-col-type {
+  left: 306px;
+  min-width: 48px;
+}
+
 .sticky-col-total {
   right: 0;
   min-width: 140px;
@@ -1142,9 +1321,27 @@ a {
   text-align: left;
 }
 
+.monthly-recap-kind-cell {
+  font-size: 14px;
+  font-weight: 800;
+  color: #1b3a7b;
+}
+
 .attendance-status-cell {
   min-width: 42px;
   font-weight: 800;
+}
+
+.monthly-recap-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, #eef5ff, #f8fbff);
+  color: #38558a;
+  font-size: 14px;
 }
 
 .monthly-recap-empty {
@@ -1305,6 +1502,21 @@ a {
     width: 100%;
   }
 
+  .schedule-range-grid,
+  .schedule-time-grid,
+  .monthly-recap-action-stack {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-pill-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .schedule-pill-row b {
+    text-align: left;
+  }
+
   .monthly-recap-search-field {
     max-width: none;
   }
@@ -1337,6 +1549,10 @@ a {
   .map-caption-head {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .history-photo-grid {
+    grid-template-columns: 1fr;
   }
 
   .calendar-grid {

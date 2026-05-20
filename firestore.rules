@@ -53,10 +53,22 @@ service cloud.firestore {
 
     function isDaySchedule(dayData) {
       return dayData is map &&
-        dayData.keys().hasOnly(["isActive", "checkIn", "checkOut"]) &&
+        dayData.keys().hasOnly([
+          "isActive",
+          "checkInStart",
+          "checkInEnd",
+          "lateStart",
+          "lateEnd",
+          "checkOutStart",
+          "checkOutEnd"
+        ]) &&
         dayData.isActive is bool &&
-        isOptionalTimeString(dayData.checkIn) &&
-        isOptionalTimeString(dayData.checkOut);
+        isOptionalTimeString(dayData.checkInStart) &&
+        isOptionalTimeString(dayData.checkInEnd) &&
+        isOptionalTimeString(dayData.lateStart) &&
+        isOptionalTimeString(dayData.lateEnd) &&
+        isOptionalTimeString(dayData.checkOutStart) &&
+        isOptionalTimeString(dayData.checkOutEnd);
     }
 
     function isWeeklySchedule(data) {
@@ -98,6 +110,8 @@ service cloud.firestore {
           "checkOutTime",
           "status",
           "photoUri",
+          "photoUriCheckIn",
+          "photoUriCheckOut",
           "userNisn"
         ]) &&
         isNonEmptyString(request.resource.data.id, 120) &&
@@ -111,7 +125,9 @@ service cloud.firestore {
         request.resource.id == request.resource.data.userNisn + "_" + request.resource.data.date &&
         isOptionalString(request.resource.data.checkInTime, 20) &&
         isOptionalString(request.resource.data.checkOutTime, 20) &&
-        isOptionalString(request.resource.data.photoUri, 700000);
+        isOptionalString(request.resource.data.photoUri, 700000) &&
+        isOptionalString(request.resource.data.photoUriCheckIn, 700000) &&
+        isOptionalString(request.resource.data.photoUriCheckOut, 700000);
     }
 
     function isAttendanceSettingsPayload() {

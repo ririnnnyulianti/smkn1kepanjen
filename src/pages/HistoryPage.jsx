@@ -40,15 +40,33 @@ function HistoryPage() {
               </button>
             </div>
             <p className="history-photo-date">{selectedRecord.dateLabel}</p>
-            {selectedRecord.photoUri ? (
-              <img
-                className="history-photo-modal-image"
-                src={selectedRecord.photoUri}
-                alt={`Foto absensi ${selectedRecord.dateLabel}`}
-              />
-            ) : (
-              <div className="history-photo-empty">Foto untuk riwayat ini belum tersedia.</div>
-            )}
+            <div className="history-photo-grid">
+              <div className="history-photo-panel">
+                <strong>Foto Datang</strong>
+                {selectedRecord.photoUriCheckIn ? (
+                  <img
+                    className="history-photo-modal-image"
+                    src={selectedRecord.photoUriCheckIn}
+                    alt={`Foto datang ${selectedRecord.dateLabel}`}
+                  />
+                ) : (
+                  <div className="history-photo-empty">Foto datang belum tersedia.</div>
+                )}
+              </div>
+
+              <div className="history-photo-panel">
+                <strong>Foto Pulang</strong>
+                {selectedRecord.photoUriCheckOut ? (
+                  <img
+                    className="history-photo-modal-image"
+                    src={selectedRecord.photoUriCheckOut}
+                    alt={`Foto pulang ${selectedRecord.dateLabel}`}
+                  />
+                ) : (
+                  <div className="history-photo-empty">Foto pulang belum tersedia.</div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       ) : null}

@@ -7,6 +7,14 @@ import {
 } from "./constants";
 
 const JAKARTA_TIMEZONE = "Asia/Jakarta";
+const SCHEDULE_FIELDS = [
+  "checkInStart",
+  "checkInEnd",
+  "lateStart",
+  "lateEnd",
+  "checkOutStart",
+  "checkOutEnd",
+];
 
 function getJakartaDateParts(date) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
@@ -22,6 +30,102 @@ function getJakartaDateParts(date) {
     month: Number(parts.find((part) => part.type === "month")?.value ?? 1),
     day: Number(parts.find((part) => part.type === "day")?.value ?? 1),
   };
+}
+
+function getJakartaTimeParts(date) {
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: JAKARTA_TIMEZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(date);
+  const hours = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
+  const minutes = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
+
+  return { hours, minutes };
+}
+
+function formatWithTimeZone(date, options) {
+  return new Intl.DateTimeFormat("id-ID", {
+    timeZone: JAKARTA_TIMEZONE,
+    ...options,
+  }).format(date);
+}
+
+function isValidTimeString(value) {
+  return typeof value === "string" && /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(value);
+}
+
+function sanitizeTime(value, fallbackValue = null) {
+  if (value === null) {
+    return null;
+  }
+
+  if (isValidTimeString(value)) {
+    return value;
+  }
+
+  return isValidTimeString(fallbackValue) ? fallbackValue : null;
+}
+
+function getRangeLabel(start, end) {
+  return `${formatScheduleTime(start)} - ${formatScheduleTime(end)}`;
+}
+
+function addMinutesToTimeString(value, deltaMinutes) {
+  if (!isValidTimeString(value)) {
+    return null;
+  }
+
+  const nextMinutes = timeStringToMinutes(value) + deltaMinutes;
+  const safeMinutes = Math.max(0, Math.min(nextMinutes, 23 * 60 + 59));
+  const hours = `${Math.floor(safeMinutes / 60)}`.padStart(2, "0");
+  const minutes = `${safeMinutes % 60}`.padStart(2, "0");
+
+  return `${hours}:${minutes}`;
+}
+
+function getLegacyFallback(field, rawDay, defaultDay) {
+  const legacyCheckIn = sanitizeTime(rawDay?.checkIn, defaultDay.checkInStart);
+  const legacyCheckOut = sanitizeTime(rawDay?.checkOut, defaultDay.checkOutEnd);
+
+  switch (field) {
+    case "checkInStart":
+    case "checkInEnd":
+      return legacyCheckIn ?? defaultDay[field];
+    case "lateStart":
+      return legacyCheckIn ? addMinutesToTimeString(legacyCheckIn, 1) : defaultDay.lateStart;
+    case "lateEnd":
+    case "checkOutStart":
+    case "checkOutEnd":
+      return legacyCheckOut ?? defaultDay[field];
+    default:
+      return defaultDay[field];
+  }
+}
+
+function normalizeDaySchedule(rawDay, defaultDay) {
+  const normalized = {
+    isActive:
+      typeof rawDay?.isActive === "boolean" ? rawDay.isActive : defaultDay.isActive,
+  };
+
+  for (const field of SCHEDULE_FIELDS) {
+    normalized[field] = sanitizeTime(
+      rawDay?.[field],
+      getLegacyFallback(field, rawDay, defaultDay)
+    );
+  }
+
+  if (!normalized.isActive) {
+    for (const field of SCHEDULE_FIELDS) {
+      normalized[field] = null;
+    }
+  }
+
+  return normalized;
 }
 
 export function haversineDistance(lat1, lon1, lat2, lon2) {
@@ -52,58 +156,194 @@ export function isWithinAllowedRadius(latitude, longitude, settings) {
   );
 }
 
-export function getAttendanceWindow(settings, now = new Date()) {
+export function getAttendanceWindow(settings, now = new Date(), holidayInfo = null) {
   const safeSettings = normalizeAttendanceSettings(settings);
   const dayKey = getDayKey(now);
   const schedule = safeSettings.weeklySchedule[dayKey] ?? DEFAULT_WEEKLY_SCHEDULE[dayKey];
+  const holiday = normalizeHolidayInfo(holidayInfo);
 
-  if (!schedule?.isActive || !schedule?.checkIn || !schedule?.checkOut) {
+  if (holiday.isNationalHoliday) {
     return {
       dayKey,
       schedule,
+      holiday,
       isOffDay: true,
-      withinHours: false,
+      offReason: "national_holiday",
+      checkInStatus: "closed",
+      checkOutStatus: "closed",
+      canCheckIn: false,
+      canCheckOut: false,
+      attendanceStatus: null,
       isLate: false,
+      withinHours: false,
+    };
+  }
+
+  if (!schedule?.isActive || !isScheduleConfigured(schedule)) {
+    return {
+      dayKey,
+      schedule,
+      holiday,
+      isOffDay: true,
+      offReason: "inactive_schedule",
+      checkInStatus: "closed",
+      checkOutStatus: "closed",
+      canCheckIn: false,
+      canCheckOut: false,
+      attendanceStatus: null,
+      isLate: false,
+      withinHours: false,
     };
   }
 
   const { hours, minutes } = getJakartaTimeParts(now);
   const currentMinutes = hours * 60 + minutes;
-  const startMinutes = timeStringToMinutes(schedule.checkIn);
-  const endMinutes = timeStringToMinutes(schedule.checkOut);
+  const checkInStartMinutes = timeStringToMinutes(schedule.checkInStart);
+  const checkInEndMinutes = timeStringToMinutes(schedule.checkInEnd);
+  const lateStartMinutes = timeStringToMinutes(schedule.lateStart);
+  const lateEndMinutes = timeStringToMinutes(schedule.lateEnd);
+  const checkOutStartMinutes = timeStringToMinutes(schedule.checkOutStart);
+  const checkOutEndMinutes = timeStringToMinutes(schedule.checkOutEnd);
 
-  if (currentMinutes < startMinutes || currentMinutes > endMinutes) {
-    return {
-      dayKey,
-      schedule,
-      isOffDay: false,
-      withinHours: false,
-      isLate: false,
-    };
+  let checkInStatus = "closed";
+  let attendanceStatus = null;
+
+  if (currentMinutes < checkInStartMinutes) {
+    checkInStatus = "not_open";
+  } else if (currentMinutes <= checkInEndMinutes) {
+    checkInStatus = "normal";
+    attendanceStatus = "hadir";
+  } else if (currentMinutes >= lateStartMinutes && currentMinutes <= lateEndMinutes) {
+    checkInStatus = "late";
+    attendanceStatus = "terlambat";
+  }
+
+  let checkOutStatus = "closed";
+  if (currentMinutes < checkOutStartMinutes) {
+    checkOutStatus = "not_open";
+  } else if (currentMinutes <= checkOutEndMinutes) {
+    checkOutStatus = "open";
   }
 
   return {
     dayKey,
     schedule,
+    holiday,
     isOffDay: false,
-    withinHours: true,
-    isLate: currentMinutes > startMinutes,
+    offReason: null,
+    checkInStatus,
+    checkOutStatus,
+    canCheckIn: checkInStatus === "normal" || checkInStatus === "late",
+    canCheckOut: checkOutStatus === "open",
+    attendanceStatus,
+    isLate: attendanceStatus === "terlambat",
+    withinHours: checkInStatus === "normal" || checkInStatus === "late" || checkOutStatus === "open",
   };
 }
 
-function getJakartaTimeParts(date) {
-  const formatter = new Intl.DateTimeFormat("en-GB", {
-    timeZone: JAKARTA_TIMEZONE,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+export function getAttendanceBlockedMessage(attendanceWindow, mode, dayLabel) {
+  if (attendanceWindow.isOffDay) {
+    if (attendanceWindow.offReason === "national_holiday") {
+      const holidayName = attendanceWindow.holiday.name
+        ? ` (${attendanceWindow.holiday.name})`
+        : "";
+      return `Hari ini Hari Libur Nasional${holidayName}. Presensi tidak bisa dilakukan.`;
+    }
 
-  const parts = formatter.formatToParts(date);
-  const hours = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
-  const minutes = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
+    return `Hari ini ${dayLabel} libur. Tidak ada presensi yang perlu dikirim.`;
+  }
 
-  return { hours, minutes };
+  if (mode === "checkin") {
+    if (attendanceWindow.checkInStatus === "not_open") {
+      return "Jam presensi datang belum dibuka.";
+    }
+
+    if (attendanceWindow.checkInStatus === "closed") {
+      return "Jam presensi datang sudah ditutup. Silakan lihat jadwal presensi.";
+    }
+  }
+
+  if (attendanceWindow.checkOutStatus === "not_open") {
+    return "Jam presensi pulang belum dibuka.";
+  }
+
+  if (attendanceWindow.checkOutStatus === "closed") {
+    return "Jam presensi pulang sudah ditutup.";
+  }
+
+  return "";
+}
+
+export function getAttendanceScheduleSummary(schedule) {
+  if (!schedule?.isActive || !isScheduleConfigured(schedule)) {
+    return "Libur";
+  }
+
+  return [
+    `Datang ${getRangeLabel(schedule.checkInStart, schedule.checkInEnd)}`,
+    `Terlambat ${getRangeLabel(schedule.lateStart, schedule.lateEnd)}`,
+    `Pulang ${getRangeLabel(schedule.checkOutStart, schedule.checkOutEnd)}`,
+  ].join(" • ");
+}
+
+export function getScheduleValidationErrors(schedule) {
+  if (!schedule?.isActive) {
+    return [];
+  }
+
+  const missingFields = SCHEDULE_FIELDS.filter((field) => !isValidTimeString(schedule[field]));
+  if (missingFields.length > 0) {
+    return ["Semua range jam harus diisi lengkap untuk hari aktif."];
+  }
+
+  const checkInStart = timeStringToMinutes(schedule.checkInStart);
+  const checkInEnd = timeStringToMinutes(schedule.checkInEnd);
+  const lateStart = timeStringToMinutes(schedule.lateStart);
+  const lateEnd = timeStringToMinutes(schedule.lateEnd);
+  const checkOutStart = timeStringToMinutes(schedule.checkOutStart);
+  const checkOutEnd = timeStringToMinutes(schedule.checkOutEnd);
+
+  const errors = [];
+
+  if (checkInStart > checkInEnd) {
+    errors.push("Jam datang harus berurutan dari waktu lebih awal ke lebih akhir.");
+  }
+
+  if (lateStart > lateEnd) {
+    errors.push("Jam terlambat harus berurutan dari waktu lebih awal ke lebih akhir.");
+  }
+
+  if (checkOutStart > checkOutEnd) {
+    errors.push("Jam pulang harus berurutan dari waktu lebih awal ke lebih akhir.");
+  }
+
+  if (checkInEnd >= lateStart) {
+    errors.push("Jam datang harus berakhir sebelum jam terlambat dimulai.");
+  }
+
+  if (lateEnd >= checkOutStart) {
+    errors.push("Jam terlambat harus berakhir sebelum jam pulang dibuka.");
+  }
+
+  return errors;
+}
+
+export function isScheduleConfigured(schedule) {
+  return SCHEDULE_FIELDS.every((field) => isValidTimeString(schedule?.[field]));
+}
+
+export function normalizeHolidayInfo(holidayInfo) {
+  const holidayList = Array.isArray(holidayInfo?.holidayList)
+    ? holidayInfo.holidayList.filter((item) => typeof item === "string" && item.trim())
+    : [];
+
+  return {
+    date: typeof holidayInfo?.date === "string" ? holidayInfo.date : null,
+    isHoliday: Boolean(holidayInfo?.isHoliday),
+    isNationalHoliday: Boolean(holidayInfo?.isNationalHoliday),
+    holidayList,
+    name: holidayList[0] ?? null,
+  };
 }
 
 export function getDayKey(date = new Date()) {
@@ -145,39 +385,35 @@ export function getCurrentWeekDates(date = new Date()) {
 }
 
 export function formatTime(date) {
-  return new Intl.DateTimeFormat("id-ID", {
+  return formatWithTimeZone(date, {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-  })
-    .format(date)
-    .replaceAll(":", ".");
+  }).replaceAll(":", ".");
 }
 
 export function formatTimeShort(date) {
-  return new Intl.DateTimeFormat("id-ID", {
+  return formatWithTimeZone(date, {
     hour: "2-digit",
     minute: "2-digit",
-  })
-    .format(date)
-    .replaceAll(":", ".");
+  }).replaceAll(":", ".");
 }
 
 export function formatDate(date) {
-  return new Intl.DateTimeFormat("id-ID", {
+  return formatWithTimeZone(date, {
     weekday: "long",
     day: "numeric",
     month: "long",
     year: "numeric",
-  }).format(date);
+  });
 }
 
 export function formatDateShort(date) {
-  return new Intl.DateTimeFormat("id-ID", {
+  return formatWithTimeZone(date, {
     day: "numeric",
     month: "long",
     year: "numeric",
-  }).format(date);
+  });
 }
 
 export function formatWeekDate(date) {
@@ -190,11 +426,9 @@ export function formatWeekDate(date) {
 }
 
 export function buildDateKey(date) {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
+  const { year, month, day } = getJakartaDateParts(date);
 
-  return `${year}-${month}-${day}`;
+  return `${year}-${`${month}`.padStart(2, "0")}-${`${day}`.padStart(2, "0")}`;
 }
 
 export function getCalendarMatrix(selectedDate) {
@@ -209,7 +443,7 @@ export function getCalendarMatrix(selectedDate) {
 }
 
 export function timeStringToMinutes(value) {
-  if (!value || !value.includes(":")) {
+  if (!isValidTimeString(value)) {
     return 0;
   }
 
@@ -226,25 +460,7 @@ export function normalizeAttendanceSettings(rawSettings) {
   const weeklySchedule = DAY_ORDER.reduce((result, dayKey) => {
     const defaultDay = DEFAULT_WEEKLY_SCHEDULE[dayKey];
     const rawDay = rawSettings?.weeklySchedule?.[dayKey];
-
-    result[dayKey] = {
-      isActive:
-        typeof rawDay?.isActive === "boolean" ? rawDay.isActive : defaultDay.isActive,
-      checkIn:
-        typeof rawDay?.checkIn === "string" || rawDay?.checkIn === null
-          ? rawDay.checkIn
-          : defaultDay.checkIn,
-      checkOut:
-        typeof rawDay?.checkOut === "string" || rawDay?.checkOut === null
-          ? rawDay.checkOut
-          : defaultDay.checkOut,
-    };
-
-    if (!result[dayKey].isActive) {
-      result[dayKey].checkIn = null;
-      result[dayKey].checkOut = null;
-    }
-
+    result[dayKey] = normalizeDaySchedule(rawDay, defaultDay);
     return result;
   }, {});
 

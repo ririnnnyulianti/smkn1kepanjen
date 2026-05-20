@@ -7,7 +7,14 @@ import {
   DEFAULT_ATTENDANCE_SETTINGS,
 } from "../constants";
 import { useSettings } from "../context/SettingsContext";
-import { formatWeekDate, getCurrentWeekDates } from "../utils";
+import { getNationalHolidayInfo } from "../services/holidayService";
+import {
+  buildDateKey,
+  formatWeekDate,
+  getAttendanceScheduleSummary,
+  getCurrentWeekDates,
+  getScheduleValidationErrors,
+} from "../utils";
 
 function AdminSchedulePage() {
   const { settings, saveSettings, resetSettings } = useSettings();
@@ -15,6 +22,7 @@ function AdminSchedulePage() {
   const [message, setMessage] = useState({ type: "", text: "" });
   const [isSaving, setIsSaving] = useState(false);
   const [currentDate, setCurrentDate] = useState(() => new Date());
+  const [holidayMap, setHolidayMap] = useState({});
 
   useEffect(() => {
     setForm(settings);
@@ -29,6 +37,28 @@ function AdminSchedulePage() {
   }, []);
 
   const weekDates = useMemo(() => getCurrentWeekDates(currentDate), [currentDate]);
+
+  useEffect(() => {
+    let active = true;
+    const weekDateEntries = Object.entries(weekDates);
+
+    Promise.all(
+      weekDateEntries.map(async ([dayKey, date]) => [
+        dayKey,
+        await getNationalHolidayInfo(buildDateKey(date)),
+      ])
+    ).then((entries) => {
+      if (!active) {
+        return;
+      }
+
+      setHolidayMap(Object.fromEntries(entries));
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [weekDates]);
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -52,13 +82,28 @@ function AdminSchedulePage() {
       };
 
       if (field === "isActive" && value === false) {
-        nextDay.checkIn = null;
-        nextDay.checkOut = null;
+        nextDay.checkInStart = null;
+        nextDay.checkInEnd = null;
+        nextDay.lateStart = null;
+        nextDay.lateEnd = null;
+        nextDay.checkOutStart = null;
+        nextDay.checkOutEnd = null;
       }
 
       if (field === "isActive" && value === true) {
-        nextDay.checkIn = nextDay.checkIn ?? DEFAULT_ATTENDANCE_SETTINGS.weeklySchedule[dayKey].checkIn;
-        nextDay.checkOut = nextDay.checkOut ?? DEFAULT_ATTENDANCE_SETTINGS.weeklySchedule[dayKey].checkOut;
+        nextDay.checkInStart =
+          nextDay.checkInStart ?? DEFAULT_ATTENDANCE_SETTINGS.weeklySchedule[dayKey].checkInStart;
+        nextDay.checkInEnd =
+          nextDay.checkInEnd ?? DEFAULT_ATTENDANCE_SETTINGS.weeklySchedule[dayKey].checkInEnd;
+        nextDay.lateStart =
+          nextDay.lateStart ?? DEFAULT_ATTENDANCE_SETTINGS.weeklySchedule[dayKey].lateStart;
+        nextDay.lateEnd =
+          nextDay.lateEnd ?? DEFAULT_ATTENDANCE_SETTINGS.weeklySchedule[dayKey].lateEnd;
+        nextDay.checkOutStart =
+          nextDay.checkOutStart ??
+          DEFAULT_ATTENDANCE_SETTINGS.weeklySchedule[dayKey].checkOutStart;
+        nextDay.checkOutEnd =
+          nextDay.checkOutEnd ?? DEFAULT_ATTENDANCE_SETTINGS.weeklySchedule[dayKey].checkOutEnd;
       }
 
       return {
@@ -75,6 +120,22 @@ function AdminSchedulePage() {
     event.preventDefault();
     setIsSaving(true);
     setMessage({ type: "", text: "" });
+
+    const invalidDay = DAY_ORDER
+      .map((dayKey) => ({
+        dayKey,
+        errors: getScheduleValidationErrors(form.weeklySchedule?.[dayKey]),
+      }))
+      .find((item) => item.errors.length > 0);
+
+    if (invalidDay) {
+      setIsSaving(false);
+      setMessage({
+        type: "error",
+        text: `${DAY_LABELS[invalidDay.dayKey]}: ${invalidDay.errors[0]}`,
+      });
+      return;
+    }
 
     try {
       await saveSettings({
@@ -203,6 +264,8 @@ function AdminSchedulePage() {
             {DAY_ORDER.map((dayKey) => {
               const daySchedule = form.weeklySchedule?.[dayKey];
               const dayDate = weekDates[dayKey];
+              const holidayInfo = holidayMap[dayKey];
+              const validationErrors = getScheduleValidationErrors(daySchedule);
 
               return (
                 <div className="schedule-day-card" key={dayKey}>
@@ -213,6 +276,11 @@ function AdminSchedulePage() {
                         {dayDate ? `, ${formatWeekDate(dayDate)}` : ""}
                       </strong>
                       <span>{daySchedule?.isActive ? "Hari kerja" : "Libur"}</span>
+                      {holidayInfo?.isNationalHoliday ? (
+                        <span className="holiday-label">
+                          Hari Libur Nasional{holidayInfo.name ? ` - ${holidayInfo.name}` : ""}
+                        </span>
+                      ) : null}
                     </div>
 
                     <label className="switch-field">
@@ -227,27 +295,104 @@ function AdminSchedulePage() {
                     </label>
                   </div>
 
-                  <div className="settings-grid compact">
-                    <label className="field">
-                      <span>Jam Datang</span>
-                      <input
-                        type="time"
-                        value={daySchedule?.checkIn ?? ""}
-                        disabled={!daySchedule?.isActive}
-                        onChange={(event) => updateSchedule(dayKey, "checkIn", event.target.value)}
-                      />
-                    </label>
+                  <div className="schedule-range-grid">
+                    <div className="schedule-range-card">
+                      <strong>Jam Datang</strong>
+                      <div className="schedule-time-grid">
+                        <label className="field">
+                          <span>Dari</span>
+                          <input
+                            type="time"
+                            value={daySchedule?.checkInStart ?? ""}
+                            disabled={!daySchedule?.isActive}
+                            onChange={(event) =>
+                              updateSchedule(dayKey, "checkInStart", event.target.value)
+                            }
+                          />
+                        </label>
 
-                    <label className="field">
-                      <span>Jam Pulang</span>
-                      <input
-                        type="time"
-                        value={daySchedule?.checkOut ?? ""}
-                        disabled={!daySchedule?.isActive}
-                        onChange={(event) => updateSchedule(dayKey, "checkOut", event.target.value)}
-                      />
-                    </label>
+                        <label className="field">
+                          <span>Sampai</span>
+                          <input
+                            type="time"
+                            value={daySchedule?.checkInEnd ?? ""}
+                            disabled={!daySchedule?.isActive}
+                            onChange={(event) =>
+                              updateSchedule(dayKey, "checkInEnd", event.target.value)
+                            }
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="schedule-range-card">
+                      <strong>Jam Terlambat</strong>
+                      <div className="schedule-time-grid">
+                        <label className="field">
+                          <span>Dari</span>
+                          <input
+                            type="time"
+                            value={daySchedule?.lateStart ?? ""}
+                            disabled={!daySchedule?.isActive}
+                            onChange={(event) =>
+                              updateSchedule(dayKey, "lateStart", event.target.value)
+                            }
+                          />
+                        </label>
+
+                        <label className="field">
+                          <span>Sampai</span>
+                          <input
+                            type="time"
+                            value={daySchedule?.lateEnd ?? ""}
+                            disabled={!daySchedule?.isActive}
+                            onChange={(event) =>
+                              updateSchedule(dayKey, "lateEnd", event.target.value)
+                            }
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="schedule-range-card">
+                      <strong>Jam Pulang</strong>
+                      <div className="schedule-time-grid">
+                        <label className="field">
+                          <span>Dari</span>
+                          <input
+                            type="time"
+                            value={daySchedule?.checkOutStart ?? ""}
+                            disabled={!daySchedule?.isActive}
+                            onChange={(event) =>
+                              updateSchedule(dayKey, "checkOutStart", event.target.value)
+                            }
+                          />
+                        </label>
+
+                        <label className="field">
+                          <span>Sampai</span>
+                          <input
+                            type="time"
+                            value={daySchedule?.checkOutEnd ?? ""}
+                            disabled={!daySchedule?.isActive}
+                            onChange={(event) =>
+                              updateSchedule(dayKey, "checkOutEnd", event.target.value)
+                            }
+                          />
+                        </label>
+                      </div>
+                    </div>
                   </div>
+
+                  {daySchedule?.isActive ? (
+                    <div className="schedule-preview-text">
+                      {getAttendanceScheduleSummary(daySchedule)}
+                    </div>
+                  ) : null}
+
+                  {validationErrors.length > 0 ? (
+                    <div className="inline-message error">{validationErrors[0]}</div>
+                  ) : null}
                 </div>
               );
             })}

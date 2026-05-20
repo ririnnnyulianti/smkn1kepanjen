@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useState } from "react";
 import { Camera, LocateFixed, MapPin } from "lucide-react";
 import { Circle, MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
@@ -9,9 +8,13 @@ import InfoPill from "../components/InfoPill";
 import { DAY_LABELS, IS_ATTENDANCE_TEST_MODE } from "../constants";
 import { useAttendance } from "../context/AttendanceContext";
 import { useSettings } from "../context/SettingsContext";
+import { getNationalHolidayInfo } from "../services/holidayService";
 import {
-  formatDateShort,
+  buildDateKey,
+  getAttendanceBlockedMessage,
+  getAttendanceScheduleSummary,
   formatScheduleTime,
+  formatDateShort,
   getAttendanceWindow,
   haversineDistance,
   isWithinAllowedRadius,
@@ -42,7 +45,16 @@ function AttendancePage({ mode }) {
   const [locationLoading, setLocationLoading] = useState(true);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [message, setMessage] = useState({ type: "", text: "" });
-  const now = new Date();
+  const [now, setNow] = useState(() => new Date());
+  const [holidayInfo, setHolidayInfo] = useState(null);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNow(new Date());
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -100,6 +112,20 @@ function AttendancePage({ mode }) {
     return () => URL.revokeObjectURL(objectUrl);
   }, [photoFile]);
 
+  useEffect(() => {
+    let active = true;
+
+    getNationalHolidayInfo(now).then((result) => {
+      if (active) {
+        setHolidayInfo(result);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [buildDateKey(now)]);
+
   const distance = useMemo(() => {
     if (!currentLocation) {
       return null;
@@ -116,16 +142,17 @@ function AttendancePage({ mode }) {
   const withinRadius =
     currentLocation &&
     isWithinAllowedRadius(currentLocation.latitude, currentLocation.longitude, settings);
-  const attendanceWindow = getAttendanceWindow(settings, now);
+  const attendanceWindow = getAttendanceWindow(settings, now, holidayInfo);
   const isOffDay = attendanceWindow.isOffDay;
-  const canSubmitByTime = IS_ATTENDANCE_TEST_MODE || attendanceWindow.withinHours;
+  const canSubmitByTime = IS_ATTENDANCE_TEST_MODE
+    ? true
+    : mode === "checkin"
+      ? attendanceWindow.canCheckIn
+      : attendanceWindow.canCheckOut;
   const canSubmitByRadius = IS_ATTENDANCE_TEST_MODE || withinRadius;
   const activeDayLabel = DAY_LABELS[attendanceWindow.dayKey];
-  const activeScheduleLabel = isOffDay
-    ? "Libur"
-    : `${formatScheduleTime(attendanceWindow.schedule?.checkIn)} - ${formatScheduleTime(
-        attendanceWindow.schedule?.checkOut
-      )}`;
+  const activeScheduleLabel = getAttendanceScheduleSummary(attendanceWindow.schedule);
+  const activeSchedule = attendanceWindow.schedule;
   const locationAccuracy =
     currentLocation?.accuracy != null ? `${Math.round(currentLocation.accuracy)} m` : "Tidak tersedia";
   const radiusStatusText = locationLoading
@@ -140,6 +167,7 @@ function AttendancePage({ mode }) {
         : "Posisi Anda sudah masuk area absensi."
       : `Anda perlu mendekat ke titik absensi maksimal ${settings.radiusMeters} meter.`
     : "Perlu izin lokasi untuk mengecek radius.";
+  const blockedMessage = getAttendanceBlockedMessage(attendanceWindow, mode, activeDayLabel);
 
   const mapCenter = currentLocation
     ? [
@@ -165,7 +193,7 @@ function AttendancePage({ mode }) {
     if (isOffDay) {
       setMessage({
         type: "warning",
-        text: `Hari ini ${activeDayLabel} libur. Tidak ada absensi yang perlu dikirim.`,
+        text: blockedMessage,
       });
       return;
     }
@@ -183,7 +211,7 @@ function AttendancePage({ mode }) {
     if (!canSubmitByTime) {
       setMessage({
         type: "warning",
-        text: `Presensi hanya aktif pada jam kerja ${activeScheduleLabel}.`,
+        text: blockedMessage || `Presensi hanya aktif pada jadwal ${activeScheduleLabel}.`,
       });
       return;
     }
@@ -201,7 +229,7 @@ function AttendancePage({ mode }) {
 
     try {
       if (mode === "checkin") {
-        await addCheckIn(now, attendanceWindow.isLate, photoFile);
+        await addCheckIn(now, photoFile);
       } else {
         await addCheckOut(now, photoFile);
       }
@@ -314,7 +342,42 @@ function AttendancePage({ mode }) {
           <div className="attendance-info-grid">
             <InfoPill label="Tanggal" value={formatDateShort(now)} />
             <InfoPill label="Hari Aktif" value={activeDayLabel} />
-            <InfoPill label="Jam Kerja" value={activeScheduleLabel} />
+            <InfoPill
+              label="Status Hari"
+              value={
+                attendanceWindow.holiday.isNationalHoliday
+                  ? "Hari Libur Nasional"
+                  : isOffDay
+                    ? "Libur"
+                    : "Hari Kerja"
+              }
+            />
+            <div className="info-pill schedule-pill">
+              <span>Jadwal Presensi</span>
+              <div className="schedule-pill-list">
+                <div className="schedule-pill-row">
+                  <strong>Datang</strong>
+                  <b>
+                    {formatScheduleTime(activeSchedule?.checkInStart)} -{" "}
+                    {formatScheduleTime(activeSchedule?.checkInEnd)}
+                  </b>
+                </div>
+                <div className="schedule-pill-row">
+                  <strong>Terlambat</strong>
+                  <b>
+                    {formatScheduleTime(activeSchedule?.lateStart)} -{" "}
+                    {formatScheduleTime(activeSchedule?.lateEnd)}
+                  </b>
+                </div>
+                <div className="schedule-pill-row">
+                  <strong>Pulang</strong>
+                  <b>
+                    {formatScheduleTime(activeSchedule?.checkOutStart)} -{" "}
+                    {formatScheduleTime(activeSchedule?.checkOutEnd)}
+                  </b>
+                </div>
+              </div>
+            </div>
             <InfoPill label="Radius Maks." value={`${settings.radiusMeters} meter`} />
             <InfoPill label="Akurasi GPS" value={locationAccuracy} />
             <InfoPill
@@ -329,10 +392,24 @@ function AttendancePage({ mode }) {
             />
           </div>
 
-          {isOffDay ? (
-            <div className="inline-message warning">
-              Hari ini {activeDayLabel} libur. Foto absen dan tombol kirim disembunyikan.
+          {attendanceWindow.holiday.isNationalHoliday ? (
+            <div className="holiday-label">
+              Hari Libur Nasional{attendanceWindow.holiday.name ? ` - ${attendanceWindow.holiday.name}` : ""}
             </div>
+          ) : null}
+
+          {isOffDay ? (
+            <div
+              className={`inline-message ${
+                attendanceWindow.holiday.isNationalHoliday ? "error" : "warning"
+              }`}
+            >
+              {blockedMessage}
+            </div>
+          ) : null}
+
+          {!isOffDay && !canSubmitByTime ? (
+            <div className="inline-message warning">{blockedMessage}</div>
           ) : null}
 
           <div className={`status-box radius-status ${canSubmitByRadius ? "success" : "warning"}`}>

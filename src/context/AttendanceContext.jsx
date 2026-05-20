@@ -5,6 +5,7 @@ import { IS_ATTENDANCE_TEST_MODE, SCHOOL_NAME } from "../constants";
 import { useAuth } from "./AuthContext";
 import { useSettings } from "./SettingsContext";
 import { db } from "../firebase";
+import { getNationalHolidayInfo } from "../services/holidayService";
 import { buildDateKey, formatDateShort, formatTimeShort, getAttendanceWindow } from "../utils";
 
 const AttendanceContext = createContext(undefined);
@@ -124,30 +125,40 @@ export function AttendanceProvider({ children }) {
     window.localStorage.setItem(getStorageKey(user.nisn), JSON.stringify(updatedRecords));
   }
 
-  async function addCheckIn(time, isLate, photoFile) {
+  async function addCheckIn(time, photoFile) {
     if (!user?.nisn) {
       throw new Error("Sesi login tidak ditemukan.");
     }
 
-    const attendanceWindow = getAttendanceWindow(settings, time);
+    const holidayInfo = await getNationalHolidayInfo(time);
+    const attendanceWindow = getAttendanceWindow(settings, time, holidayInfo);
     if (attendanceWindow.isOffDay) {
-      throw new Error("Hari ini libur. Tidak ada absensi masuk yang perlu dikirim.");
+      throw new Error(
+        attendanceWindow.offReason === "national_holiday"
+          ? "Hari ini Hari Libur Nasional. Presensi datang tidak bisa dilakukan."
+          : "Hari ini libur. Tidak ada absensi masuk yang perlu dikirim."
+      );
+    }
+
+    if (!attendanceWindow.canCheckIn) {
+      throw new Error("Jam presensi datang sudah ditutup. Silakan lihat jadwal presensi.");
     }
 
     const dateKey = buildDateKey(time);
     const dateLabel = formatDateShort(time);
     const timeLabel = formatTimeShort(time);
     const existing = records.find((record) => record.date === dateKey);
-    const photoUri = photoFile
+    const photoUriCheckIn = photoFile
       ? await uploadAttendancePhoto(user.nisn, photoFile, dateKey, "checkin")
-      : existing?.photoUri ?? null;
+      : existing?.photoUriCheckIn ?? existing?.photoUri ?? null;
 
     if (existing) {
       await syncRecord({
         ...existing,
         checkInTime: timeLabel,
-        status: isLate ? "terlambat" : "hadir",
-        photoUri,
+        status: attendanceWindow.attendanceStatus ?? "hadir",
+        photoUri: existing.photoUri ?? photoUriCheckIn,
+        photoUriCheckIn,
         dateValue: new Date(dateKey).getTime(),
       });
       return;
@@ -161,8 +172,10 @@ export function AttendanceProvider({ children }) {
       school: SCHOOL_NAME,
       checkInTime: timeLabel,
       checkOutTime: null,
-      status: isLate ? "terlambat" : "hadir",
-      photoUri,
+      status: attendanceWindow.attendanceStatus ?? "hadir",
+      photoUri: photoUriCheckIn,
+      photoUriCheckIn,
+      photoUriCheckOut: null,
     });
   }
 
@@ -171,24 +184,38 @@ export function AttendanceProvider({ children }) {
       throw new Error("Sesi login tidak ditemukan.");
     }
 
-    const attendanceWindow = getAttendanceWindow(settings, time);
+    const holidayInfo = await getNationalHolidayInfo(time);
+    const attendanceWindow = getAttendanceWindow(settings, time, holidayInfo);
     if (attendanceWindow.isOffDay) {
-      throw new Error("Hari ini libur. Tidak ada absensi pulang yang perlu dikirim.");
+      throw new Error(
+        attendanceWindow.offReason === "national_holiday"
+          ? "Hari ini Hari Libur Nasional. Presensi pulang tidak bisa dilakukan."
+          : "Hari ini libur. Tidak ada absensi pulang yang perlu dikirim."
+      );
+    }
+
+    if (!attendanceWindow.canCheckOut) {
+      throw new Error(
+        attendanceWindow.checkOutStatus === "not_open"
+          ? "Jam presensi pulang belum dibuka."
+          : "Jam presensi pulang sudah ditutup."
+      );
     }
 
     const dateKey = buildDateKey(time);
     const dateLabel = formatDateShort(time);
     const timeLabel = formatTimeShort(time);
     const existing = records.find((record) => record.date === dateKey);
-    const photoUri = photoFile
+    const photoUriCheckOut = photoFile
       ? await uploadAttendancePhoto(user.nisn, photoFile, dateKey, "checkout")
-      : existing?.photoUri ?? null;
+      : existing?.photoUriCheckOut ?? existing?.photoUri ?? null;
 
     if (existing) {
       await syncRecord({
         ...existing,
         checkOutTime: timeLabel,
-        photoUri: photoUri ?? existing.photoUri,
+        photoUri: existing.photoUri ?? existing.photoUriCheckIn ?? photoUriCheckOut,
+        photoUriCheckOut,
         dateValue: new Date(dateKey).getTime(),
       });
       return;
@@ -203,7 +230,9 @@ export function AttendanceProvider({ children }) {
       checkInTime: null,
       checkOutTime: timeLabel,
       status: "hadir",
-      photoUri,
+      photoUri: photoUriCheckOut,
+      photoUriCheckIn: null,
+      photoUriCheckOut,
     });
   }
 
@@ -238,16 +267,31 @@ function getStorageKey(nisn) {
 }
 
 function normalizeRecord(record, fallbackId) {
+  const hasSeparateCheckInPhoto = Object.prototype.hasOwnProperty.call(record, "photoUriCheckIn");
+  const hasSeparateCheckOutPhoto = Object.prototype.hasOwnProperty.call(record, "photoUriCheckOut");
+  const normalizedCheckInTime = record.checkInTime ?? null;
+  const normalizedCheckOutTime = record.checkOutTime ?? null;
+
   return {
     id: record.id ?? fallbackId,
     date: record.date,
     dateLabel: record.dateLabel,
     dateValue: record.dateValue ?? new Date(record.date).getTime(),
     school: record.school ?? SCHOOL_NAME,
-    checkInTime: record.checkInTime ?? null,
-    checkOutTime: record.checkOutTime ?? null,
+    checkInTime: normalizedCheckInTime,
+    checkOutTime: normalizedCheckOutTime,
     status: record.status ?? "hadir",
     photoUri: record.photoUri ?? null,
+    photoUriCheckIn: hasSeparateCheckInPhoto
+      ? record.photoUriCheckIn ?? null
+      : normalizedCheckInTime
+        ? record.photoUri ?? null
+        : null,
+    photoUriCheckOut: hasSeparateCheckOutPhoto
+      ? record.photoUriCheckOut ?? null
+      : normalizedCheckOutTime
+        ? record.photoUri ?? null
+        : null,
     userNisn: record.userNisn ?? null,
   };
 }
